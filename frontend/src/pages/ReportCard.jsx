@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import Modal from '../components/Modal';
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from '../config';
 
 const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebate }) => {
   const [report, setReport] = useState(null);
@@ -324,12 +323,12 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebat
           <div>
             <span className="text-[10px] font-bold text-blue-400 uppercase tracking-widest">Cognitive Profile</span>
             <h2 className="text-xl font-black text-white mt-2">
-              Dominant Vulnerability: <span className="text-indigo-400 font-extrabold uppercase">{cogProfile.dominant_error_type?.replace('_', ' ')}</span>
+              Dominant Vulnerability: <span className="text-indigo-400 font-extrabold uppercase">{cogProfile.dominant_error_type?.replace(/_/g, ' ')}</span>
             </h2>
             <p className="text-xs text-gray-400 leading-relaxed mt-2">
               {cogProfile.dominant_error_type === 'CORRECT' 
                 ? "Excellent job! You displayed high mastery with clear understanding and calibrated confidence." 
-                : `Our evaluator flagged ${cogProfile.dominant_error_type?.replace('_', ' ')} as your dominant error pattern. Check detailed feedback below.`}
+                : `Our evaluator flagged ${cogProfile.dominant_error_type?.replace(/_/g, ' ')} as your dominant error pattern. Check detailed feedback below.`}
             </p>
           </div>
 
@@ -344,7 +343,7 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebat
                   key={type} 
                   className="px-2.5 py-1 text-[10px] font-bold bg-white/5 border border-white/10 text-gray-300 rounded-full"
                 >
-                  {count} {type.replace('_', ' ')}
+                  {count} {type.replace(/_/g, ' ')}
                 </span>
               ))
             )}
@@ -469,7 +468,7 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebat
               
               <div className="flex items-center gap-2">
                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${getErrorBadgeClass(ev.error_type)}`}>
-                  {ev.error_type?.replace('_', ' ')}
+                  {ev.error_type?.replace(/_/g, ' ')}
                 </span>
                 <span className="text-[10px] font-semibold text-gray-500 bg-slate-800/40 px-2 py-0.5 rounded border border-white/5">
                   Score: {ev.score}/10
@@ -566,7 +565,7 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebat
                       <div className="bg-black/30 border border-white/5 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
                         <div>
                           <span className="block text-[10px] font-bold text-purple-400 uppercase mb-1">Original Marker Guess</span>
-                          <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace('_', ' ')}</span></p>
+                          <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace(/_/g, ' ')}</span></p>
                           <p className="text-gray-400 leading-relaxed text-[11px] mt-1">{ev.feedback}</p>
                         </div>
                       </div>
@@ -580,7 +579,7 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebat
                         </div>
                         
                         <div className="space-y-1">
-                          <p className="text-xs font-semibold text-white">Confirmed: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace('_', ' ')}</span></p>
+                          <p className="text-xs font-semibold text-white">Confirmed: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace(/_/g, ' ')}</span></p>
                           <p className="text-gray-300 leading-relaxed text-[11px]">
                             <strong className="text-white">Misunderstanding:</strong> "{confirmedDiag.root_cause}"
                           </p>

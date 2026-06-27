@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from '../config';
 
 const SocraticDebate = ({ debateId, onBack }) => {
   const [debate, setDebate] = useState(null);
@@ -218,7 +217,7 @@ const SocraticDebate = ({ debateId, onBack }) => {
                       ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
                       : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
                   }`}>
-                    {debate.diagnosis.confirmed_error_type.replace('_', ' ')}
+                    {debate.diagnosis.confirmed_error_type.replace(/_/g, ' ')}
                   </span>
                   
                   <span className="text-[10px] uppercase font-bold bg-slate-800 border border-white/10 text-gray-300 px-2.5 py-1 rounded-full">

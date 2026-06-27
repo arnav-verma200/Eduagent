@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, List
 from backend.db.supabase_client import get_supabase
@@ -7,7 +8,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/exams", tags=["reports"])
 
 @router.get("/{exam_id}/report")
-async def get_class_report(exam_id: str):
+async def get_class_report(exam_id: UUID):
     """
     Returns class-wide diagnostic report for a specific exam.
     Computes top concept gaps, error type distribution, and compiles integrity flags.
@@ -63,7 +64,7 @@ async def get_class_report(exam_id: str):
             eval_data = r.get("evaluation") or {}
             cog_profile = eval_data.get("cognitive_profile") or {}
             score = cog_profile.get("score", 0)
-            max_score = cog_profile.get("max_score", 10)
+            max_score = cog_profile.get("max_score", 100)
             
             percentage = (score / max_score) * 100 if max_score > 0 else 0
             total_score_pct += percentage

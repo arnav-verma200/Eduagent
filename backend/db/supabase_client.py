@@ -3,30 +3,48 @@ import logging
 from dotenv import load_dotenv
 from supabase import create_client, Client
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Use module-level logger only — don't reconfigure root logger (QUALITY-2 fix)
 logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
 
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
+# Lazy-initialized singleton (BUG-6 fix)
+# The client is created on first use rather than at import time, so transient
+# network failures during startup don't permanently disable database access.
+_supabase: Client | None = None
+_init_attempted: bool = False
 
-if not supabase_url or not supabase_key:
-    logger.warning("SUPABASE_URL or SUPABASE_KEY is missing. Database operations will fail unless configured.")
-
-supabase: Client = None
-if supabase_url and supabase_key:
-    try:
-        supabase = create_client(supabase_url, supabase_key)
-        logger.info("Supabase client initialized successfully.")
-    except Exception as e:
-        logger.error(f"Failed to initialize Supabase client: {e}")
-else:
-    logger.warning("Supabase client not initialized due to missing environment variables.")
 
 def get_supabase() -> Client:
-    if supabase is None:
-        raise ValueError("Supabase client is not initialized. Please check your environment variables.")
-    return supabase
+    """
+    Lazy-initializes and returns the Supabase client singleton.
+    Retries initialization if a previous attempt failed, allowing recovery
+    from transient network issues without restarting the server.
+    """
+    global _supabase, _init_attempted
+
+    if _supabase is not None:
+        return _supabase
+
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_KEY")
+
+    if not supabase_url or not supabase_key:
+        raise ValueError(
+            "Supabase client cannot be initialized: SUPABASE_URL or SUPABASE_KEY "
+            "environment variable is missing. Please check your .env file."
+        )
+
+    try:
+        _supabase = create_client(supabase_url, supabase_key)
+        if not _init_attempted:
+            logger.info("Supabase client initialized successfully.")
+        else:
+            logger.info("Supabase client initialized successfully on retry.")
+        _init_attempted = True
+        return _supabase
+    except Exception as e:
+        _init_attempted = True
+        logger.error(f"Failed to initialize Supabase client: {e}")
+        raise ValueError(f"Failed to initialize Supabase client: {e}")

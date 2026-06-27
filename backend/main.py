@@ -24,11 +24,19 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# CORS middleware for hackathon connection
+# CORS middleware — use FRONTEND_URL for production, fallback to permissive for dev (BUG-15 fix)
+frontend_url = os.getenv("FRONTEND_URL", "").strip()
+if frontend_url:
+    cors_origins = [frontend_url]
+    cors_credentials = True
+else:
+    cors_origins = ["*"]
+    cors_credentials = False  # Wildcard + credentials violates CORS spec
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins for the hackathon
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=cors_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )

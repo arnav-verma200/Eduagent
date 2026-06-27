@@ -4,8 +4,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid 
 } from 'recharts';
 import Modal from '../components/Modal';
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from '../config';
 
 const TeacherDashboard = ({ onViewStudentReport }) => {
   const [topic, setTopic] = useState('');
@@ -130,6 +129,10 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
   const fetchReport = async (examId) => {
     setReportLoading(true);
     setSelectedExamId(examId);
+    // BUG-13 fix: Clear stale debate transcripts when switching exams
+    setDebateHistoryMap({});
+    setExpandedStudentId(null);
+    setStudentDetail(null);
     try {
       const res = await fetch(`${API_BASE}/api/exams/${examId}/report`);
       if (res.ok) {
@@ -196,7 +199,7 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
   const getChartData = () => {
     if (!report || !report.error_type_distribution) return [];
     return Object.entries(report.error_type_distribution).map(([key, val]) => ({
-      name: key.replace('_', ' '),
+      name: key.replace(/_/g, ' '),
       value: val
     })).filter(item => item.value > 0);
   };
@@ -647,7 +650,7 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
                               </td>
                             </tr>
                             {expandedStudentId === st.student_id && (
-                              <tr key={`details-${idx}`}>
+                              <tr key={`details-${st.student_id}`}>
                                 <td colSpan="6" className="bg-slate-950/60 p-6 border-b border-white/10">
                                   {detailLoading ? (
                                     <div className="flex justify-center items-center py-6 gap-2">
@@ -688,7 +691,7 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
                                                   <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3 flex flex-col justify-between">
                                                     <div>
                                                       <span className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Initial Assessment</span>
-                                                      <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace('_', ' ')}</span></p>
+                                                      <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace(/_/g, ' ')}</span></p>
                                                       <p className="text-gray-400 mt-1 leading-relaxed text-[11px]">{ev.feedback}</p>
                                                     </div>
                                                   </div>
@@ -709,7 +712,7 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
                                                     </div>
 
                                                     <div className="space-y-1 text-xs">
-                                                      <p className="font-semibold text-white">Confirmed Type: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace('_', ' ')}</span></p>
+                                                      <p className="font-semibold text-white">Confirmed Type: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace(/_/g, ' ')}</span></p>
                                                       <p className="text-gray-300 leading-relaxed text-[11px]">
                                                         <strong className="text-white block text-[9.5px] mb-0.5">Root Cause:</strong>
                                                         "{confirmedDiag.root_cause}"

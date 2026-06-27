@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from backend.db.supabase_client import get_supabase
 
@@ -6,7 +7,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="", tags=["students"])
 
 @router.get("/api/exams/{exam_id}/student/{student_id}")
-async def get_student_report(exam_id: str, student_id: str):
+async def get_student_report(exam_id: UUID, student_id: str):
     """
     Returns individual student cognitive fingerprint report for a specific exam.
     Matches database result evaluations back to the original question definitions.

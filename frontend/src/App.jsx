@@ -1,11 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import TeacherDashboard from './pages/TeacherDashboard';
 import ExamInterface from './pages/ExamInterface';
 import ReportCard from './pages/ReportCard';
 import SocraticDebate from './pages/SocraticDebate';
 import Modal from './components/Modal';
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from './config';
 
 function App() {
   const [role, setRole] = useState('teacher'); // 'teacher' | 'student'
@@ -38,14 +37,22 @@ function App() {
     setModalConfig(prev => ({ ...prev, isOpen: false }));
   };
 
+  const lastFetchedRef = useRef(0);
+
   // Fetch exams for student list
   const fetchStudentExams = async () => {
+    // Only fetch if 30 seconds have passed since last fetch to optimize performance (PERF-6)
+    const now = Date.now();
+    if (now - lastFetchedRef.current < 30000 && activeExams.length > 0) {
+      return;
+    }
     setExamsLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/exams`);
       if (res.ok) {
         const data = await res.json();
         setActiveExams(data);
+        lastFetchedRef.current = now;
       }
     } catch (err) {
       console.error("Failed to fetch exams in student view:", err);

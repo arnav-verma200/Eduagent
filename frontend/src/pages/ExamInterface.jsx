@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import Scratchpad from '../components/Scratchpad';
 import ConfidenceSlider from '../components/ConfidenceSlider';
 import Modal from '../components/Modal';
-
-const API_BASE = "http://localhost:8000";
+import { API_BASE } from '../config';
 
 const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
   const [exam, setExam] = useState(null);
