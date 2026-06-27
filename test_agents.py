@@ -83,13 +83,13 @@ async def run_tests():
         blind_spots = cog_profile.get("blind_spots", [])
         concept_gaps = cog_profile.get("conceptual_gaps", [])
         
-        probe_res = generate_probe_questions(blind_spots, concept_gaps, "Algorithms and Data Structures")
+        probe_res = await generate_probe_questions(blind_spots, concept_gaps, "Algorithms and Data Structures")
         print("[SUCCESS] Adversarial Probe ran successfully.")
         print(json.dumps(probe_res, indent=2))
         
         # 5. Test Integrity Agent
         print("\nTesting Integrity Analyzer Agent...")
-        integrity_res = analyze_integrity(mock_responses, evaluation["evaluations"], mock_questions)
+        integrity_res = await analyze_integrity(mock_responses, evaluation["evaluations"], mock_questions)
         print("[SUCCESS] Integrity Analyzer ran successfully.")
         print(json.dumps(integrity_res, indent=2))
         

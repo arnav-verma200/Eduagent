@@ -10,8 +10,13 @@ from google.genai.errors import APIError
 
 logger = logging.getLogger(__name__)
 
-# Fallback chain for Gemini Free Tier to handle 429 Resource Exhausted errors
 MODELS_CHAIN = [
+    "gemma-4-26b",
+    "gemma-4-31b",
+    "antigravity-4-26b",
+    "antigravity-4-31b",
+    "anti-gravity-4-26b",
+    "anti-gravity-4-31b",
     "gemini-3.5-flash",
     "gemini-3.1-pro",
     "gemini-3.1-flash-lite",
