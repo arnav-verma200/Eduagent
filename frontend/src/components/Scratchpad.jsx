@@ -3,12 +3,14 @@ import React from 'react';
 const Scratchpad = ({ 
   value, 
   onChange, 
-  placeholder = "Write out your step-by-step thinking process here...\nFor example: 'If we split the list in half, we search...' or 'Using the formula...'" 
+  placeholder = "Write out your step-by-step thinking process here...\nFor example: 'If we split the list in half, we search...' or 'Using the formula...'",
+  disabled = false,
+  onPaste
 }) => {
   const charCount = value ? value.length : 0;
   
   return (
-    <div className="w-full mt-4 bg-slate-900/40 rounded-2xl border border-white/5 p-4 focus-within:border-blue-500/30 transition-all duration-300">
+    <div className={`w-full mt-4 bg-slate-900/40 rounded-2xl border border-white/5 p-4 focus-within:border-blue-500/30 transition-all duration-300 ${disabled ? 'opacity-50 select-none' : ''}`}>
       <div className="flex items-center justify-between mb-2">
         <label className="flex items-center gap-2 text-xs font-semibold text-blue-400 uppercase tracking-wider">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -28,6 +30,8 @@ const Scratchpad = ({
         placeholder={placeholder}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        onPaste={onPaste}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Scratchpad from '../components/Scratchpad';
 import ConfidenceSlider from '../components/ConfidenceSlider';
 import Modal from '../components/Modal';
@@ -18,6 +18,14 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
   const [confidences, setConfidences] = useState({}); // { q_id: 1-5 }
   const [timeSpent, setTimeSpent] = useState({}); // { q_id: seconds }
   
+  // Violation & Telemetry states
+  const [copyPasteDetected, setCopyPasteDetected] = useState({}); // { q_id: boolean }
+  const [tabChangeDetected, setTabChangeDetected] = useState({}); // { q_id: boolean }
+  const [lockedQuestions, setLockedQuestions] = useState({}); // { q_id: 'tab_switch' | 'copy_paste' | null }
+  
+  // Prevent duplicate modals/alerts on fast blur/visibility events
+  const alertActiveRef = useRef(false);
+
   // Total timer
   const [totalSeconds, setTotalSeconds] = useState(0);
 
@@ -118,6 +126,69 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
     return () => clearInterval(interval);
   }, [loading, submitting, currentIdx, questions]);
 
+  // Telemetry: Detect Tab changes and Window blur
+  useEffect(() => {
+    if (loading || submitting || !questions.length || currentIdx >= questions.length) return;
+
+    const handleTabSwitch = () => {
+      if (document.hidden) {
+        const currentQ = questions[currentIdx];
+        if (lockedQuestions[currentQ.id] || alertActiveRef.current) return;
+
+        alertActiveRef.current = true;
+        
+        setAnswers(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
+        setScratchpads(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
+        setLockedQuestions(prev => ({ ...prev, [currentQ.id]: 'tab_switch' }));
+        setTabChangeDetected(prev => ({ ...prev, [currentQ.id]: true }));
+
+        triggerModal(
+          'error',
+          'Cheating Alert: Tab Switch Detected',
+          `You navigated away from the exam tab. Question ${currentIdx + 1} has been skipped and locked. You can no longer edit this question's answer.`,
+          () => {
+            alertActiveRef.current = false;
+            if (currentIdx < questions.length - 1) {
+              setCurrentIdx(currentIdx + 1);
+            }
+          }
+        );
+      }
+    };
+
+    const handleWindowBlur = () => {
+      const currentQ = questions[currentIdx];
+      if (lockedQuestions[currentQ.id] || alertActiveRef.current) return;
+
+      alertActiveRef.current = true;
+
+      setAnswers(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
+      setScratchpads(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
+      setLockedQuestions(prev => ({ ...prev, [currentQ.id]: 'tab_switch' }));
+      setTabChangeDetected(prev => ({ ...prev, [currentQ.id]: true }));
+
+      triggerModal(
+        'error',
+        'Cheating Alert: Focus Lost',
+        `You switched focus to another window or application. Question ${currentIdx + 1} has been skipped and locked.`,
+        () => {
+          alertActiveRef.current = false;
+          if (currentIdx < questions.length - 1) {
+            setCurrentIdx(currentIdx + 1);
+          }
+        }
+      );
+    };
+
+    document.addEventListener('visibilitychange', handleTabSwitch);
+    window.addEventListener('blur', handleWindowBlur);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleTabSwitch);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [loading, submitting, currentIdx, questions, lockedQuestions]);
+
   const handleNext = () => {
     const activeQ = questions[currentIdx];
     const answer = answers[activeQ.id];
@@ -170,6 +241,29 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
     }));
   };
 
+  const handlePasteAttempt = (e) => {
+    const currentQ = questions[currentIdx];
+    if (lockedQuestions[currentQ.id]) return;
+
+    e.preventDefault();
+
+    setAnswers(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Copy-Paste Attempted" }));
+    setScratchpads(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Copy-Paste Attempted" }));
+    setLockedQuestions(prev => ({ ...prev, [currentQ.id]: 'copy_paste' }));
+    setCopyPasteDetected(prev => ({ ...prev, [currentQ.id]: true }));
+
+    triggerModal(
+      'error',
+      'Cheating Alert: Copy-Paste Blocked',
+      `Copy-pasting is strictly prohibited in this exam. Question ${currentIdx + 1} has been locked and skipped.`,
+      () => {
+        if (currentIdx < questions.length - 1) {
+          setCurrentIdx(currentIdx + 1);
+        }
+      }
+    );
+  };
+
   const executeSubmission = async () => {
     setSubmitting(true);
     
@@ -179,7 +273,9 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
       answer: answers[q.id] || "No answer provided",
       scratchpad: scratchpads[q.id] || "No scratchpad provided",
       confidence: confidences[q.id] || 3,
-      time_spent: timeSpent[q.id] || 0
+      time_spent: timeSpent[q.id] || 0,
+      copy_paste_detected: !!copyPasteDetected[q.id],
+      tab_change_detected: !!tabChangeDetected[q.id]
     }));
 
     const payload = {
@@ -396,19 +492,33 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
           {currentQ.text}
         </h3>
 
+        {lockedQuestions[currentQ.id] && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 p-4 rounded-2xl text-xs font-semibold flex items-center gap-2 mb-6 animate-pulse">
+            <span className="text-sm">⚠️</span>
+            <span>
+              This question has been locked due to an integrity violation ({lockedQuestions[currentQ.id] === 'tab_switch' ? 'Tab Switch detected' : 'Copy-Paste attempted'}). You cannot edit your answers or reasoning.
+            </span>
+          </div>
+        )}
+
         {/* Answer Inputs based on Question Type */}
         {currentQ.type === 'mcq' ? (
           <div className="space-y-3 mb-6">
             {(currentQ.options || []).map((option, idx) => {
               const isSelected = qAnswer === option;
+              const isLocked = !!lockedQuestions[currentQ.id];
               return (
                 <div
                   key={idx}
-                  onClick={() => handleMCQSelect(currentQ.id, option)}
-                  className={`p-4 rounded-2xl border cursor-pointer transition-all duration-300 flex items-center justify-between ${
+                  onClick={isLocked ? undefined : () => handleMCQSelect(currentQ.id, option)}
+                  className={`p-4 rounded-2xl border transition-all duration-300 flex items-center justify-between ${
+                    isLocked 
+                      ? 'opacity-40 select-none cursor-not-allowed' 
+                      : 'cursor-pointer hover:border-white/10 hover:bg-black/30'
+                  } ${
                     isSelected
                       ? 'bg-blue-500/10 border-blue-500/50 text-white'
-                      : 'bg-black/20 border-white/5 hover:border-white/10 hover:bg-black/30 text-gray-300'
+                      : 'bg-black/20 border-white/5 text-gray-300'
                   }`}
                 >
                   <span className="text-sm font-medium pr-4">{option}</span>
@@ -425,10 +535,12 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
           <div className="space-y-2 mb-6">
             <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Your Answer</label>
             <textarea
-              className="w-full h-28 p-4 bg-black/30 border border-white/5 rounded-2xl text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500/30 transition resize-none leading-relaxed"
+              className="w-full h-28 p-4 bg-black/30 border border-white/5 rounded-2xl text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500/30 focus:border-blue-500/30 transition resize-none leading-relaxed disabled:opacity-40 disabled:cursor-not-allowed"
               placeholder="Type your final answer/conclusions here..."
               value={qAnswer}
               onChange={(e) => handleTextAnswerChange(currentQ.id, e.target.value)}
+              disabled={!!lockedQuestions[currentQ.id]}
+              onPaste={handlePasteAttempt}
             />
           </div>
         )}
@@ -437,11 +549,14 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
         <Scratchpad
           value={qScratchpad}
           onChange={(text) => handleScratchpadChange(currentQ.id, text)}
+          disabled={!!lockedQuestions[currentQ.id]}
+          onPaste={handlePasteAttempt}
         />
 
         <ConfidenceSlider
           value={qConfidence}
           onChange={(val) => handleConfidenceChange(currentQ.id, val)}
+          disabled={!!lockedQuestions[currentQ.id]}
         />
       </div>
 

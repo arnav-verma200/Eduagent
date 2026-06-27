@@ -1,0 +1,2 @@
+copy paste detection for chaeting 
+tab change detection is tab is chnaged then the question will be skiped and u will not able to ans same goes for copy and pasting 

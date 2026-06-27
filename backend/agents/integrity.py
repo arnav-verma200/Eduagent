@@ -45,6 +45,8 @@ def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[
         confidence = resp.get("confidence", 3)
         score = ev.get("score", 0)
         scratchpad = resp.get("scratchpad", "")
+        copy_paste_detected = resp.get("copy_paste_detected", False)
+        tab_change_detected = resp.get("tab_change_detected", False)
         
         has_scratchpad = bool(scratchpad and scratchpad.strip() and scratchpad != "No scratchpad provided")
         if has_scratchpad:
@@ -60,7 +62,9 @@ def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[
             "has_scratchpad": has_scratchpad,
             "scratchpad_length": len(scratchpad) if scratchpad else 0,
             "reasoning_quality": ev.get("reasoning_quality", "absent"),
-            "is_correct": ev.get("is_correct", False)
+            "is_correct": ev.get("is_correct", False),
+            "copy_paste_detected": copy_paste_detected,
+            "tab_change_detected": tab_change_detected
         })
         total_time += time_spent
         
@@ -68,6 +72,8 @@ def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[
     scratchpad_rate = scratchpads_provided / total_questions if total_questions > 0 else 0
     
     very_fast_answers = sum(1 for qs in question_signals if qs["time_spent_seconds"] < 5)
+    copy_paste_count = sum(1 for qs in question_signals if qs["copy_paste_detected"])
+    tab_change_count = sum(1 for qs in question_signals if qs["tab_change_detected"])
     
     return {
         "summary_metrics": {
@@ -75,7 +81,9 @@ def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[
             "total_time_spent_seconds": total_time,
             "average_time_spent_seconds": avg_time,
             "scratchpad_rate": scratchpad_rate,
-            "very_fast_answers_count": very_fast_answers
+            "very_fast_answers_count": very_fast_answers,
+            "copy_paste_violations_count": copy_paste_count,
+            "tab_change_violations_count": tab_change_count
         },
         "question_level_signals": question_signals
     }
@@ -92,14 +100,15 @@ def analyze_integrity(responses: List[Dict[str, Any]], evaluations: List[Dict[st
         "You are an expert educational integrity analyst.\n"
         "Analyze the provided behavioral signals of a student taking an exam and flag anomalies.\n"
         "Look for the following patterns:\n"
+        "- Explicit violations: copy_paste_detected is true, or tab_change_detected is true. If either flag is true, create a high-severity flag immediately.\n"
         "- Timing anomalies: Very fast correct answers on hard or short answer questions (e.g. less than 5 seconds).\n"
         "- Confidence anomalies: High confidence (5) but extremely poor reasoning quality and incorrect answers; or correct answers with low confidence and no reasoning.\n"
         "- Reasoning anomalies: Correct answers on hard questions but with zero or absent reasoning quality, suggesting potential guessing or copy-pasting.\n"
         "- Pattern anomalies: Identical response times across multiple questions, or sudden changes in speed.\n\n"
         "CRITICAL RULES:\n"
         "1. Never make definitive accusations of cheating (e.g. do not say 'student cheated' or 'plagiarized').\n"
-        "2. Frame all flags as anomalies with specific, objective evidence (e.g. 'Student answered a hard short answer question in 2 seconds').\n"
-        "3. Return an integrity_score from 0 to 100, where 100 means no anomalies, and lower scores indicate increasing severity or frequency of anomalies.\n"
+        "2. Frame all flags as anomalies with specific, objective evidence (e.g. 'Student triggered a tab-switch lock on question q2' or 'Copy-paste attempt blocked on question q3').\n"
+        "3. Return an integrity_score from 0 to 100, where 100 means no anomalies. Deduct 15 to 20 points from the integrity score for every copy-paste or tab-change violation.\n"
         "4. Return ONLY a valid JSON object matching the requested schema. No markdown (do not wrap in ```json blocks), no preamble, no explanation."
     )
 

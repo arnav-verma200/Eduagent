@@ -1,6 +1,6 @@
 import React from 'react';
 
-const ConfidenceSlider = ({ value, onChange }) => {
+const ConfidenceSlider = ({ value, onChange, disabled = false }) => {
   const getConfidenceDetails = (val) => {
     switch (val) {
       case 1:
@@ -21,7 +21,7 @@ const ConfidenceSlider = ({ value, onChange }) => {
   const details = getConfidenceDetails(Number(value));
 
   return (
-    <div className="w-full mt-4 bg-slate-900/40 rounded-2xl border border-white/5 p-4">
+    <div className={`w-full mt-4 bg-slate-900/40 rounded-2xl border border-white/5 p-4 ${disabled ? 'opacity-50 select-none pointer-events-none' : ''}`}>
       <div className="flex items-center justify-between mb-3">
         <label className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           Confidence Level
@@ -39,6 +39,7 @@ const ConfidenceSlider = ({ value, onChange }) => {
         step="1"
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
+        disabled={disabled}
         className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-blue-500 focus:outline-none"
       />
       
