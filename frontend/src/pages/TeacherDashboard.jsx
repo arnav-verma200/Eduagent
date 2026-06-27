@@ -18,6 +18,76 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
   const [reportLoading, setReportLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview'); // overview, gaps, integrity, students
 
+  // Expanded student detail states for Socratic debate transcript inspection
+  const [expandedStudentId, setExpandedStudentId] = useState(null);
+  const [studentDetail, setStudentDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [debateHistoryMap, setDebateHistoryMap] = useState({});
+
+  const toggleExpandStudent = async (studentId) => {
+    if (expandedStudentId === studentId) {
+      setExpandedStudentId(null);
+      setStudentDetail(null);
+      return;
+    }
+    setExpandedStudentId(studentId);
+    setDetailLoading(true);
+    setStudentDetail(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/exams/${selectedExamId}/student/${studentId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setStudentDetail(data);
+        
+        // Fetch transcripts for completed debates
+        const diagnoses = data.confirmed_diagnosis || {};
+        for (const [qId, diag] of Object.entries(diagnoses)) {
+          if (diag.debate_id && !debateHistoryMap[diag.debate_id]) {
+            fetchDebateTranscript(diag.debate_id);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to load student detailed report:", err);
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const fetchDebateTranscript = async (debateId) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/debate/${debateId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setDebateHistoryMap(prev => ({
+          ...prev,
+          [debateId]: data.conversation_history || []
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to fetch debate transcript:", err);
+    }
+  };
+
+  const getErrorBadgeClass = (errType) => {
+    switch (errType) {
+      case 'CORRECT':
+        return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/25';
+      case 'CONCEPTUAL_GAP':
+        return 'bg-red-500/10 text-red-400 border-red-500/25';
+      case 'PROCEDURAL_ERROR':
+        return 'bg-amber-500/10 text-amber-400 border-amber-500/25';
+      case 'BLIND_SPOT':
+        return 'bg-blue-500/10 text-blue-400 border-blue-500/25';
+      case 'MISCALIBRATION':
+        return 'bg-indigo-500/10 text-indigo-400 border-indigo-500/25';
+      case 'PARTIAL':
+        return 'bg-pink-500/10 text-pink-400 border-pink-500/25';
+      default:
+        return 'bg-slate-500/10 text-gray-400 border-white/5';
+    }
+  };
+
   // Custom Modal configuration
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
@@ -516,8 +586,9 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
                         </thead>
                         <tbody className="divide-y divide-white/5">
                           {report.student_results.map((st, idx) => (
-                            <tr key={idx} className="hover:bg-white/5 transition-colors">
-                              <td className="py-3 px-2 font-bold text-white">{st.student_id}</td>
+                            <React.Fragment key={idx}>
+                              <tr className="hover:bg-white/5 transition-colors">
+                                <td className="py-3 px-2 font-bold text-white">{st.student_id}</td>
                               <td className="py-3 px-2 text-center font-mono font-semibold">
                                 {st.score} / {st.max_score}
                               </td>
@@ -556,22 +627,162 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
                                   {st.gap_depth}
                                 </span>
                               </td>
-                              <td className="py-3 px-2 text-right">
+                              <td className="py-3 px-2 text-right flex justify-end gap-2">
+                                <button
+                                  onClick={() => toggleExpandStudent(st.student_id)}
+                                  className={`px-2.5 py-1 text-[11px] rounded border transition-all font-semibold ${
+                                    expandedStudentId === st.student_id
+                                      ? 'bg-purple-600 border-purple-500 text-white shadow'
+                                      : 'bg-purple-600/20 hover:bg-purple-600 text-purple-400 border-purple-500/30 hover:text-white'
+                                  }`}
+                                >
+                                  {expandedStudentId === st.student_id ? 'Hide Details' : 'View Details'}
+                                </button>
                                 <button
                                   onClick={() => onViewStudentReport(report.exam_id, st.student_id)}
-                                  className="px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white rounded border border-blue-500/30 transition-all font-semibold"
+                                  className="px-2.5 py-1 text-[11px] bg-blue-600/20 hover:bg-blue-600 text-blue-400 hover:text-white rounded border border-blue-500/30 transition-all font-semibold"
                                 >
-                                  View Fingerprint
+                                  Report Card
                                 </button>
                               </td>
                             </tr>
-                          ))}
+                            {expandedStudentId === st.student_id && (
+                              <tr key={`details-${idx}`}>
+                                <td colSpan="6" className="bg-slate-950/60 p-6 border-b border-white/10">
+                                  {detailLoading ? (
+                                    <div className="flex justify-center items-center py-6 gap-2">
+                                      <svg className="animate-spin h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                      </svg>
+                                      <span className="text-gray-400">Loading student detailed fingerprint...</span>
+                                    </div>
+                                  ) : studentDetail ? (
+                                    <div className="space-y-6 text-left">
+                                      <div className="flex justify-between items-center pb-3 border-b border-white/5">
+                                        <h4 className="text-sm font-bold text-white uppercase tracking-wider">Student: {st.student_id} Detailed Question Log</h4>
+                                      </div>
+
+                                      <div className="space-y-6">
+                                        {(studentDetail.evaluation?.evaluations || []).map((ev, eIdx) => {
+                                          const confirmedDiag = studentDetail.confirmed_diagnosis?.[ev.question_id];
+                                          const isMismatch = confirmedDiag && confirmedDiag.confirmed_error_type !== ev.error_type;
+                                          return (
+                                            <div key={eIdx} className="bg-black/30 border border-white/5 rounded-2xl p-4 space-y-4">
+                                              <div className="flex justify-between items-start flex-wrap gap-2 pb-2 border-b border-white/5">
+                                                <div>
+                                                  <span className="font-semibold text-white">Question {eIdx + 1}:</span>
+                                                  <p className="text-gray-300 mt-1">{ev.question_text}</p>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                  <span className={`px-2 py-0.5 rounded text-[9px] font-bold border ${getErrorBadgeClass(ev.error_type)}`}>
+                                                    {ev.error_type}
+                                                  </span>
+                                                </div>
+                                              </div>
+
+                                              {/* Diagnosis Side-by-Side */}
+                                              {confirmedDiag ? (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                  {/* Left: Initial Assessment */}
+                                                  <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3 flex flex-col justify-between">
+                                                    <div>
+                                                      <span className="block text-[9px] font-bold text-gray-500 uppercase mb-1">Initial Assessment</span>
+                                                      <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace('_', ' ')}</span></p>
+                                                      <p className="text-gray-400 mt-1 leading-relaxed text-[11px]">{ev.feedback}</p>
+                                                    </div>
+                                                  </div>
+
+                                                  {/* Right: Confirmed Post-Debate */}
+                                                  <div className={`border rounded-xl p-3 space-y-2 ${
+                                                    isMismatch
+                                                      ? 'bg-red-500/5 border-red-500/20 shadow-md shadow-red-500/5'
+                                                      : 'bg-emerald-500/5 border-emerald-500/20'
+                                                  }`}>
+                                                    <div className="flex justify-between items-center flex-wrap gap-1">
+                                                      <span className="block text-[9px] font-bold text-purple-400 uppercase">Post-Debate Confirmed</span>
+                                                      {isMismatch && (
+                                                        <span className="text-[9px] font-bold bg-red-500/20 text-red-400 border border-red-500/30 px-1.5 py-0.5 rounded animate-pulse uppercase tracking-wider">
+                                                          Diagnosis Mismatch
+                                                        </span>
+                                                      )}
+                                                    </div>
+
+                                                    <div className="space-y-1 text-xs">
+                                                      <p className="font-semibold text-white">Confirmed Type: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace('_', ' ')}</span></p>
+                                                      <p className="text-gray-300 leading-relaxed text-[11px]">
+                                                        <strong className="text-white block text-[9.5px] mb-0.5">Root Cause:</strong>
+                                                        "{confirmedDiag.root_cause}"
+                                                      </p>
+                                                      <p className="text-gray-300 leading-relaxed text-[11px]">
+                                                        <strong className="text-white block text-[9.5px] mb-0.5">Teacher Note:</strong>
+                                                        "{confirmedDiag.teacher_note}"
+                                                      </p>
+                                                    </div>
+
+                                                    <div className="flex justify-between items-center text-[9px] text-gray-500 pt-1.5 border-t border-white/5">
+                                                      <span>Calibrated Confidence: <strong className="text-gray-300">{confirmedDiag.confidence}%</strong></span>
+                                                      <span>Depth: <strong className="text-gray-300 uppercase font-mono">{confirmedDiag.depth}</strong></span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              ) : (
+                                                <div className="bg-slate-950/40 border border-white/5 rounded-xl p-3">
+                                                  <span className="block text-[9px] font-bold text-blue-400 uppercase mb-1">AI Diagnostics</span>
+                                                  <p className="text-gray-400 leading-relaxed text-[11px]">{ev.feedback}</p>
+                                                </div>
+                                              )}
+
+                                              {/* Debate Transcript (Collapsible) */}
+                                              {confirmedDiag && confirmedDiag.debate_id && (
+                                                <div className="border border-white/5 rounded-xl overflow-hidden mt-2 text-xs bg-slate-950/30">
+                                                  <details className="group">
+                                                    <summary className="p-3 flex justify-between items-center cursor-pointer font-semibold text-gray-400 hover:text-white select-none transition-colors">
+                                                      <span>Inspect Socratic Debate Transcript</span>
+                                                      <span className="transition-transform group-open:rotate-180 font-mono">&darr;</span>
+                                                    </summary>
+                                                    <div className="p-4 bg-slate-950/70 space-y-3 border-t border-white/5 max-h-72 overflow-y-auto">
+                                                      {(debateHistoryMap[confirmedDiag.debate_id] || []).map((tMsg, tIdx) => {
+                                                        const isAI = tMsg.role === 'ai';
+                                                        return (
+                                                          <div key={tIdx} className={`flex ${isAI ? 'justify-start' : 'justify-end'}`}>
+                                                            <div className={`p-2.5 rounded-xl max-w-[85%] text-[11.5px] leading-relaxed ${
+                                                              isAI 
+                                                                ? 'bg-slate-900 border border-white/5 text-gray-200 rounded-tl-none' 
+                                                                : 'bg-blue-600/20 border border-blue-500/20 text-white rounded-tr-none'
+                                                            }`}>
+                                                              <strong className="block text-[8.5px] text-gray-500 uppercase tracking-wider mb-0.5">{isAI ? 'Examiner' : 'Student'}</strong>
+                                                              {tMsg.message}
+                                                            </div>
+                                                          </div>
+                                                        );
+                                                      })}
+                                                      {!(debateHistoryMap[confirmedDiag.debate_id]) && (
+                                                        <p className="text-gray-500 text-center py-2 italic text-[11px]">Loading debate record...</p>
+                                                      )}
+                                                    </div>
+                                                  </details>
+                                                </div>
+                                              )}
+
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="text-red-400 text-center py-4 text-xs font-semibold">Failed to fetch detailed evaluation logs.</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
+                        ))}
                         </tbody>
                       </table>
                     </div>
                   </div>
                 )}
-
               </div>
             ) : (
               <div className="h-96 glass-panel rounded-2xl flex flex-col justify-center items-center">

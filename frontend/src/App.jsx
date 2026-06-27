@@ -2,18 +2,20 @@ import React, { useState, useEffect } from 'react';
 import TeacherDashboard from './pages/TeacherDashboard';
 import ExamInterface from './pages/ExamInterface';
 import ReportCard from './pages/ReportCard';
+import SocraticDebate from './pages/SocraticDebate';
 import Modal from './components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
 function App() {
   const [role, setRole] = useState('teacher'); // 'teacher' | 'student'
-  const [studentView, setStudentView] = useState('dashboard'); // 'dashboard' | 'taking_exam' | 'view_report'
+  const [studentView, setStudentView] = useState('dashboard'); // 'dashboard' | 'taking_exam' | 'view_report' | 'socratic_debate'
   const [studentId, setStudentId] = useState('student_alice');
   const [selectedExamId, setSelectedExamId] = useState(null);
   const [activeExams, setActiveExams] = useState([]);
   const [examsLoading, setExamsLoading] = useState(false);
   const [submittedReportData, setSubmittedReportData] = useState(null);
+  const [selectedDebateId, setSelectedDebateId] = useState(null);
 
   // Custom Modal configuration
   const [modalConfig, setModalConfig] = useState({
@@ -237,6 +239,17 @@ function App() {
                 studentId={studentId}
                 initialReportData={submittedReportData}
                 onBack={() => setStudentView('dashboard')}
+                onStartDebate={(debateId) => {
+                  setSelectedDebateId(debateId);
+                  setStudentView('socratic_debate');
+                }}
+              />
+            )}
+
+            {studentView === 'socratic_debate' && (
+              <SocraticDebate
+                debateId={selectedDebateId}
+                onBack={() => setStudentView('view_report')}
               />
             )}
           </div>

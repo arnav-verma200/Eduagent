@@ -21,3 +21,14 @@ class ProbeAnswerSubmission(BaseModel):
 class ProbeSubmissionRequest(BaseModel):
     student_id: str = Field(..., description="ID of the student")
     responses: List[ProbeAnswerSubmission]
+
+class DebateStartRequest(BaseModel):
+    exam_id: str
+    student_id: str
+    question_id: str
+    student_answer: str
+    original_error_type: str
+    original_feedback: str
+
+class DebateResponseRequest(BaseModel):
+    student_message: str

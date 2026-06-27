@@ -37,6 +37,7 @@ app.add_middleware(
 app.include_router(exams.router)
 app.include_router(students.router)
 app.include_router(reports.router)
+app.include_router(exams.debate_router)
 
 @app.get("/")
 async def root():

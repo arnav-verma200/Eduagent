@@ -8,7 +8,8 @@ from backend.agents.exam_designer import generate_exam
 from backend.agents.evaluator import evaluate_full_exam, evaluate_response
 from backend.agents.adversarial import generate_probe_questions
 from backend.agents.integrity import analyze_integrity
-from backend.models.schemas import ExamSubmissionRequest, ProbeSubmissionRequest
+from backend.models.schemas import ExamSubmissionRequest, ProbeSubmissionRequest, DebateStartRequest, DebateResponseRequest
+from backend.agents.socratic import start_debate, continue_debate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/exams", tags=["exams"])
@@ -265,4 +266,242 @@ async def submit_probe_endpoint(exam_id: str, payload: ProbeSubmissionRequest):
         raise
     except Exception as e:
         logger.error(f"Failed to submit probe answers: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =====================================================================
+IN_MEMORY_DEBATES: Dict[str, Dict[str, Any]] = {}
+
+debate_router = APIRouter(prefix="/api/debate", tags=["debate"])
+
+@debate_router.post("/start")
+async def start_debate_endpoint(payload: DebateStartRequest):
+    try:
+        supabase = get_supabase()
+        # Fetch exam questions to find the question matching question_id
+        exam_resp = supabase.table("exams").select("*").eq("id", payload.exam_id).execute()
+        if not exam_resp.data:
+            raise HTTPException(status_code=404, detail="Exam not found")
+        
+        exam = exam_resp.data[0]
+        questions = exam.get("questions", [])
+        question = next((q for q in questions if q.get("id") == payload.question_id), None)
+        if not question:
+            raise HTTPException(status_code=404, detail="Question not found in the exam")
+
+        # Start AI Socratic debate
+        ai_response = start_debate(
+            question=question,
+            student_answer=payload.student_answer,
+            original_error_type=payload.original_error_type,
+            original_feedback=payload.original_feedback
+        )
+        
+        first_message = ai_response.get("message", "Explain in your own words why you think your answer is correct.")
+        
+        # Save new debate session (try database first, fallback to in-memory)
+        debate_id = None
+        use_db = False
+        try:
+            db_insert = supabase.table("debates").insert({
+                "exam_id": payload.exam_id,
+                "student_id": payload.student_id,
+                "question_id": payload.question_id,
+                "student_answer": payload.student_answer,
+                "original_error_type": payload.original_error_type,
+                "original_feedback": payload.original_feedback,
+                "conversation_history": [{"role": "ai", "message": first_message}],
+                "debate_complete": False,
+                "diagnosis": None
+            }).execute()
+            if db_insert.data:
+                new_debate = db_insert.data[0]
+                debate_id = new_debate["id"]
+                use_db = True
+        except Exception as db_err:
+            logger.warning(f"Database insert to 'debates' failed: {db_err}. Falling back to in-memory storage.")
+            
+        if not use_db:
+            import uuid
+            debate_id = str(uuid.uuid4())
+            new_debate = {
+                "id": debate_id,
+                "exam_id": payload.exam_id,
+                "student_id": payload.student_id,
+                "question_id": payload.question_id,
+                "student_answer": payload.student_answer,
+                "original_error_type": payload.original_error_type,
+                "original_feedback": payload.original_feedback,
+                "conversation_history": [{"role": "ai", "message": first_message}],
+                "debate_complete": False,
+                "diagnosis": None
+            }
+            IN_MEMORY_DEBATES[debate_id] = new_debate
+        
+        return {
+            "debate_id": debate_id,
+            "message": first_message,
+            "debate_complete": False
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to start debate: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@debate_router.post("/{debate_id}/respond")
+async def respond_debate_endpoint(debate_id: str, payload: DebateResponseRequest):
+    try:
+        supabase = get_supabase()
+        # Fetch debate session
+        use_db = False
+        debate = None
+        
+        if debate_id in IN_MEMORY_DEBATES:
+            debate = IN_MEMORY_DEBATES[debate_id]
+        else:
+            try:
+                deb_resp = supabase.table("debates").select("*").eq("id", debate_id).execute()
+                if deb_resp.data:
+                    debate = deb_resp.data[0]
+                    use_db = True
+            except Exception as db_err:
+                logger.warning(f"Failed to fetch debate {debate_id} from database: {db_err}")
+                
+        if not debate:
+            raise HTTPException(status_code=404, detail="Debate session not found")
+        
+        if debate.get("debate_complete"):
+            return {
+                "message": debate.get("message") or "Debate is already complete.",
+                "debate_complete": True,
+                "diagnosis": debate.get("diagnosis")
+            }
+        
+        history = debate.get("conversation_history", []) or []
+        
+        # Append student message
+        history.append({"role": "student", "message": payload.student_message})
+        
+        # Fetch the question details
+        exam_resp = supabase.table("exams").select("*").eq("id", debate.get("exam_id")).execute()
+        if not exam_resp.data:
+            raise HTTPException(status_code=404, detail="Original exam not found")
+        
+        questions = exam_resp.data[0].get("questions", [])
+        question = next((q for q in questions if q.get("id") == debate.get("question_id")), None)
+        if not question:
+            raise HTTPException(status_code=404, detail="Original question details not found")
+        
+        # Continue AI Socratic debate
+        ai_response = continue_debate(
+            question=question,
+            student_answer=debate.get("student_answer"),
+            original_error_type=debate.get("original_error_type"),
+            conversation_history=history
+        )
+        
+        # Append AI message
+        ai_message = ai_response.get("message", "Elaborate further.")
+        history.append({"role": "ai", "message": ai_message})
+        
+        debate_complete = ai_response.get("debate_complete", False)
+        diagnosis = ai_response.get("diagnosis")
+        
+        # Update debate session
+        if use_db:
+            db_update = supabase.table("debates").update({
+                "conversation_history": history,
+                "debate_complete": debate_complete,
+                "diagnosis": diagnosis
+            }).eq("id", debate_id).execute()
+            if not db_update.data:
+                raise HTTPException(status_code=500, detail="Failed to update debate history in database")
+        else:
+            debate["conversation_history"] = history
+            debate["debate_complete"] = debate_complete
+            debate["diagnosis"] = diagnosis
+        
+        # If debate is complete, update the results table
+        if debate_complete and diagnosis:
+            student_id = debate.get("student_id")
+            exam_id = debate.get("exam_id")
+            question_id = debate.get("question_id")
+            
+            # Fetch the student's latest results row (surround with try-except to handle missing confirmed_diagnosis column)
+            try:
+                res_db = supabase.table("results")\
+                    .select("id, confirmed_diagnosis")\
+                    .eq("exam_id", exam_id)\
+                    .eq("student_id", student_id)\
+                    .order("created_at", desc=True)\
+                    .execute()
+                
+                if res_db.data:
+                    row_id = res_db.data[0]["id"]
+                    current_diagnoses = res_db.data[0].get("confirmed_diagnosis")
+                    if not current_diagnoses or not isinstance(current_diagnoses, dict):
+                        current_diagnoses = {}
+                    
+                    # Set/update the diagnosis for this question
+                    diagnosis["debate_id"] = debate_id
+                    current_diagnoses[question_id] = diagnosis
+                    
+                    supabase.table("results").update({
+                        "confirmed_diagnosis": current_diagnoses
+                    }).eq("id", row_id).execute()
+            except Exception as results_err:
+                logger.warning(
+                    f"Failed to update 'confirmed_diagnosis' on results table: {results_err}. "
+                    "Skipping database update for confirmed_diagnosis since the column might be missing."
+                )
+                
+        return {
+            "message": ai_message,
+            "debate_complete": debate_complete,
+            "diagnosis": diagnosis
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed responding in debate: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@debate_router.get("/{debate_id}")
+async def get_debate_endpoint(debate_id: str):
+    try:
+        supabase = get_supabase()
+        # Fetch debate session
+        debate = None
+        if debate_id in IN_MEMORY_DEBATES:
+            debate = IN_MEMORY_DEBATES[debate_id]
+        else:
+            try:
+                deb_resp = supabase.table("debates").select("*").eq("id", debate_id).execute()
+                if deb_resp.data:
+                    debate = deb_resp.data[0]
+            except Exception as db_err:
+                logger.warning(f"Failed to fetch debate from database: {db_err}")
+                
+        if not debate:
+            raise HTTPException(status_code=404, detail="Debate session not found")
+        
+        # Fetch exam details to get original question text
+        exam_resp = supabase.table("exams").select("questions").eq("id", debate.get("exam_id")).execute()
+        question_text = ""
+        if exam_resp.data:
+            questions = exam_resp.data[0].get("questions", [])
+            question = next((q for q in questions if q.get("id") == debate.get("question_id")), None)
+            if question:
+                question_text = question.get("text", "")
+        
+        # Return full object decorated with question text
+        return {
+            **debate,
+            "question_text": question_text
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to fetch debate: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

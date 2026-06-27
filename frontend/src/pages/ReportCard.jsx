@@ -3,11 +3,43 @@ import Modal from '../components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
-const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
+const ReportCard = ({ examId, studentId, initialReportData, onBack, onStartDebate }) => {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null); // null | 'not_found' | 'failed'
   
+  // Socratic debate state
+  const [debatingQId, setDebatingQId] = useState(null);
+
+  const handleStartDebateClick = async (questionId, studentAnswer, errorType, feedback) => {
+    setDebatingQId(questionId);
+    try {
+      const res = await fetch(`${API_BASE}/api/debate/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          exam_id: examId,
+          student_id: studentId,
+          question_id: questionId,
+          student_answer: studentAnswer,
+          original_error_type: errorType,
+          original_feedback: feedback
+        })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        onStartDebate(data.debate_id);
+      } else {
+        triggerModal('error', 'Debate Failed', 'Failed to start debate session.');
+      }
+    } catch (err) {
+      console.error("Failed starting debate:", err);
+      triggerModal('error', 'Connection Error', 'Error contacting the server.');
+    } finally {
+      setDebatingQId(null);
+    }
+  };
+
   // Probe answers submission state
   const [probeAnswers, setProbeAnswers] = useState({}); // { p1: answer }
   const [submittingProbe, setSubmittingProbe] = useState(false);
@@ -490,28 +522,122 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
               </div>
             )}
 
-            {/* Scratchpad and Feedback */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs mt-4 pt-4 border-t border-white/5">
-              <div>
-                <span className="block text-[10px] font-bold text-gray-500 uppercase">Your Working / Scratchpad</span>
-                <p className="text-gray-300 mt-1 italic font-mono bg-black/20 p-2.5 rounded-xl border border-white/5">
-                  {ev.scratchpad || "No scratchpad provided."}
-                </p>
-              </div>
-              <div className="flex flex-col justify-between">
-                <div>
-                  <span className="block text-[10px] font-bold text-blue-400 uppercase">AI Diagnostics</span>
-                  <p className="text-gray-200 mt-1 font-medium bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10 leading-relaxed">
-                    {ev.feedback}
-                  </p>
+            {/* Scratchpad and Feedback / Socratic Debate Side-by-Side */}
+            {(() => {
+              const confirmedDiag = report?.confirmed_diagnosis?.[ev.question_id];
+              return (
+                <div className="text-xs mt-4 pt-4 border-t border-white/5 space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <span className="block text-[10px] font-bold text-gray-500 uppercase">Your Working / Scratchpad</span>
+                      <p className="text-gray-300 mt-1 italic font-mono bg-black/20 p-2.5 rounded-xl border border-white/5 leading-relaxed">
+                        {ev.scratchpad || "No scratchpad provided."}
+                      </p>
+                    </div>
+                    {!confirmedDiag ? (
+                      <div className="flex flex-col justify-between">
+                        <div>
+                          <span className="block text-[10px] font-bold text-blue-400 uppercase">AI Diagnostics</span>
+                          <p className="text-gray-200 mt-1 font-medium bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10 leading-relaxed">
+                            {ev.feedback}
+                          </p>
+                        </div>
+                        <div className="flex gap-4 text-[10px] text-gray-500 mt-3">
+                          <span>Confidence Accuracy: <strong className="text-gray-300">{ev.confidence_accuracy}</strong></span>
+                          <span>Reasoning Quality: <strong className="text-gray-300">{ev.reasoning_quality}</strong></span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <span className="block text-[10px] font-bold text-blue-400 uppercase">Initial AI Diagnostics</span>
+                        <div className="text-gray-200 bg-blue-500/5 p-2.5 rounded-xl border border-blue-500/10 leading-relaxed flex flex-col justify-between h-full min-h-[100px]">
+                          <p>{ev.feedback}</p>
+                          <div className="flex gap-4 text-[9px] text-gray-500 mt-3 pt-1.5 border-t border-white/5">
+                            <span>Confidence: <strong className="text-gray-300">{ev.confidence_accuracy}</strong></span>
+                            <span>Reasoning: <strong className="text-gray-300">{ev.reasoning_quality}</strong></span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {confirmedDiag && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-purple-500/5 border border-purple-500/20 rounded-2xl p-4">
+                      <div className="bg-black/30 border border-white/5 rounded-xl p-3 space-y-1.5 flex flex-col justify-between">
+                        <div>
+                          <span className="block text-[10px] font-bold text-purple-400 uppercase mb-1">Original Marker Guess</span>
+                          <p className="text-xs font-semibold text-white">Error Type: <span className="text-rose-400 font-bold">{ev.error_type?.replace('_', ' ')}</span></p>
+                          <p className="text-gray-400 leading-relaxed text-[11px] mt-1">{ev.feedback}</p>
+                        </div>
+                      </div>
+
+                      <div className="bg-black/30 border border-white/5 rounded-xl p-3 space-y-2">
+                        <div className="flex justify-between items-center flex-wrap gap-2">
+                          <span className="block text-[10px] font-bold text-purple-400 uppercase">Post-Debate Socratic Confirmed</span>
+                          <span className="text-[9px] font-mono font-bold bg-purple-500/15 text-purple-400 px-2 py-0.5 rounded border border-purple-500/20">
+                            {confirmedDiag.depth} Gap
+                          </span>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-white">Confirmed: <span className="text-emerald-400 font-bold uppercase">{confirmedDiag.confirmed_error_type?.replace('_', ' ')}</span></p>
+                          <p className="text-gray-300 leading-relaxed text-[11px]">
+                            <strong className="text-white">Misunderstanding:</strong> "{confirmedDiag.root_cause}"
+                          </p>
+                        </div>
+
+                        <div className="flex justify-between items-center text-[9px] text-gray-500 pt-1.5 border-t border-white/5">
+                          <span>Confidence: <strong className="text-gray-300">{confirmedDiag.confidence}%</strong></span>
+                          <span>Original Was Correct: <strong className={confirmedDiag.original_was_correct ? "text-emerald-400" : "text-rose-400 font-bold"}>{confirmedDiag.original_was_correct ? "Yes" : "No"}</strong></span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Socratic Debate Button Block */}
+                  {(ev.error_type === 'BLIND_SPOT' || ev.error_type === 'CONCEPTUAL_GAP') && (
+                    <div className="pt-2 flex justify-between items-center gap-4 flex-wrap border-t border-white/5">
+                      <div className="text-[11px] text-gray-400">
+                        {confirmedDiag ? (
+                          <span className="flex items-center gap-1.5 text-purple-400 font-semibold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+                            Socratic debate completed. Diagnosis verified.
+                          </span>
+                        ) : (
+                          <span>Do you disagree with the AI marker's diagnosis? Defend your logic in a real-time debate.</span>
+                        )}
+                      </div>
+                      
+                      {confirmedDiag ? (
+                        <span className="px-2.5 py-1 bg-purple-500/10 text-purple-400 border border-purple-500/20 rounded-lg text-[9px] font-bold uppercase tracking-wider">
+                          Debated
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleStartDebateClick(ev.question_id, ev.answer, ev.error_type, ev.feedback)}
+                          disabled={debatingQId !== null}
+                          className={`px-4 py-2 text-white font-bold rounded-xl text-xs transition shadow-md ${
+                            ev.error_type === 'BLIND_SPOT'
+                              ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-500/10'
+                              : 'bg-amber-600 hover:bg-amber-500 shadow-amber-500/10'
+                          } flex items-center gap-1.5 disabled:opacity-40`}
+                        >
+                          {debatingQId === ev.question_id ? (
+                            <>
+                              <svg className="animate-spin h-3.5 w-3.5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                              Entering Chamber...
+                            </>
+                          ) : "Defend Your Answer →"}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
-                
-                <div className="flex gap-4 text-[10px] text-gray-500 mt-3">
-                  <span>Confidence Accuracy: <strong className="text-gray-300">{ev.confidence_accuracy}</strong></span>
-                  <span>Reasoning Quality: <strong className="text-gray-300">{ev.reasoning_quality}</strong></span>
-                </div>
-              </div>
-            </div>
+              );
+            })()}
 
           </div>
         ))}

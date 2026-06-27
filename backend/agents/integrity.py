@@ -1,27 +1,17 @@
 import os
 import json
 import logging
-from google import genai
-from google.genai import types
 from typing import List, Dict, Any
+from backend.utils.gemini import generate_with_fallback
 
 logger = logging.getLogger(__name__)
 
 def call_gemini(prompt: str, system_instruction: str) -> str:
-    api_key = os.getenv("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is not set")
-    
-    client = genai.Client(api_key=api_key)
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=system_instruction,
-            response_mime_type="application/json"
-        )
+    return generate_with_fallback(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        response_mime_type="application/json"
     )
-    return response.text
 
 def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
