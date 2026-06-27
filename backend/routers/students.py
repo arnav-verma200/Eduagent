@@ -68,6 +68,7 @@ async def get_student_submissions(student_id: str):
     """
     Retrieves all submissions/reports for a specific student.
     Used for a student's personal landing page.
+    Fixed: Batch fetches exam topics instead of N+1 queries.
     """
     try:
         supabase = get_supabase()
@@ -80,13 +81,19 @@ async def get_student_submissions(student_id: str):
             .execute()
             
         submissions = res_response.data or []
-        enriched_submissions = []
         
+        if not submissions:
+            return []
+        
+        # Batch fetch all exam topics in a single query (N+1 fix)
+        unique_exam_ids = list(set(sub["exam_id"] for sub in submissions))
+        exams_resp = supabase.table("exams").select("id, topic").in_("id", unique_exam_ids).execute()
+        exam_topic_map = {e["id"]: e["topic"] for e in (exams_resp.data or [])}
+        
+        enriched_submissions = []
         for sub in submissions:
             exam_id = sub["exam_id"]
-            # Fetch exam topic
-            exam_resp = supabase.table("exams").select("topic").eq("id", exam_id).execute()
-            topic = exam_resp.data[0]["topic"] if exam_resp.data else "Unknown Exam"
+            topic = exam_topic_map.get(exam_id, "Unknown Exam")
             
             eval_data = sub.get("evaluation") or {}
             cog_profile = eval_data.get("cognitive_profile") or {}

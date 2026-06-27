@@ -1,8 +1,7 @@
-import os
 import json
 import logging
 from typing import List, Dict, Any
-from backend.utils.gemini import generate_with_fallback
+from backend.utils.gemini import call_gemini_async, parse_json_response
 
 logger = logging.getLogger(__name__)
 
@@ -20,22 +19,25 @@ SYSTEM_PROMPT = (
     "Return ONLY valid JSON. No markdown (do not wrap in ```json blocks), no preamble, no explanation."
 )
 
-def call_gemini(prompt: str, system_instruction: str) -> str:
-    return generate_with_fallback(
-        prompt=prompt,
-        system_instruction=system_instruction,
-        response_mime_type="application/json"
-    )
 
-def parse_debate_response(response_text: str, retry_prompt: str = None) -> Dict[str, Any]:
+def turn_role(role: str) -> str:
+    """Normalize roles to student and ai."""
+    r = str(role).lower()
+    if r in ["ai", "assistant", "teacher"]:
+        return "ai"
+    return "student"
+
+
+async def _parse_debate_response(response_text: str, retry_prompt: str = None) -> Dict[str, Any]:
+    """Parse and validate a Socratic debate JSON response, with one retry on failure."""
     try:
-        return json.loads(response_text)
+        return parse_json_response(response_text)
     except Exception as e:
         logger.warning(f"Failed to parse Socratic JSON response: {e}. Retrying once...")
         if retry_prompt:
             try:
-                corrected_text = call_gemini(retry_prompt, SYSTEM_PROMPT)
-                return json.loads(corrected_text)
+                corrected_text = await call_gemini_async(retry_prompt, SYSTEM_PROMPT)
+                return parse_json_response(corrected_text)
             except Exception as retry_e:
                 logger.error(f"Retry failed to parse JSON: {retry_e}")
         # Return fallback structured response so backend doesn't crash
@@ -45,7 +47,8 @@ def parse_debate_response(response_text: str, retry_prompt: str = None) -> Dict[
             "diagnosis": None
         }
 
-def start_debate(question: Dict[str, Any], student_answer: str, original_error_type: str, original_feedback: str) -> Dict[str, Any]:
+
+async def start_debate(question: Dict[str, Any], student_answer: str, original_error_type: str, original_feedback: str) -> Dict[str, Any]:
     prompt = (
         f"We are starting a Socratic debate. Here is the question the student was asked:\n"
         f"Question: {question.get('text')}\n"
@@ -68,8 +71,8 @@ def start_debate(question: Dict[str, Any], student_answer: str, original_error_t
     )
 
     try:
-        res = call_gemini(prompt, SYSTEM_PROMPT)
-        return parse_debate_response(res, retry_prompt)
+        res = await call_gemini_async(prompt, SYSTEM_PROMPT)
+        return await _parse_debate_response(res, retry_prompt)
     except Exception as e:
         logger.error(f"Failed to start Socratic debate: {e}")
         return {
@@ -78,7 +81,7 @@ def start_debate(question: Dict[str, Any], student_answer: str, original_error_t
             "diagnosis": None
         }
 
-def continue_debate(question: Dict[str, Any], student_answer: str, original_error_type: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
+async def continue_debate(question: Dict[str, Any], student_answer: str, original_error_type: str, conversation_history: List[Dict[str, str]]) -> Dict[str, Any]:
     exchanges_count = len([c for c in conversation_history if turn_role(c.get("role")) == "student"])
     
     # Force debate_complete if limit reached (5 student messages means 5 exchanges)
@@ -133,8 +136,8 @@ def continue_debate(question: Dict[str, Any], student_answer: str, original_erro
     )
 
     try:
-        res = call_gemini(prompt, SYSTEM_PROMPT)
-        parsed = parse_debate_response(res, retry_prompt)
+        res = await call_gemini_async(prompt, SYSTEM_PROMPT)
+        parsed = await _parse_debate_response(res, retry_prompt)
         
         # Guard: Force completion if the exchanges have hit 6
         if exchanges_count >= 6 and not parsed.get("debate_complete"):
@@ -168,10 +171,3 @@ def continue_debate(question: Dict[str, Any], student_answer: str, original_erro
             "debate_complete": False,
             "diagnosis": None
         }
-
-def turn_role(role: str) -> str:
-    """Normalize roles to student and ai."""
-    r = str(role).lower()
-    if r in ["ai", "assistant", "teacher"]:
-        return "ai"
-    return "student"

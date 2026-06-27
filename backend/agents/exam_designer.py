@@ -1,18 +1,10 @@
-import os
 import json
 import logging
-from backend.utils.gemini import generate_with_fallback
+from backend.utils.gemini import call_gemini_async, parse_json_response
 
 logger = logging.getLogger(__name__)
 
-def call_gemini(prompt: str, system_instruction: str) -> str:
-    return generate_with_fallback(
-        prompt=prompt,
-        system_instruction=system_instruction,
-        response_mime_type="application/json"
-    )
-
-def generate_exam(topic: str, content: str, num_questions: int = 10) -> dict:
+async def generate_exam(topic: str, content: str, num_questions: int = 10) -> dict:
     """
     Agent 1: Exam Designer.
     Generates a structured exam based on a topic and parsed PDF text content.
@@ -55,9 +47,8 @@ def generate_exam(topic: str, content: str, num_questions: int = 10) -> dict:
     )
 
     try:
-        response_text = call_gemini(prompt, system_instruction)
-        # Parse JSON
-        return json.loads(response_text)
+        response_text = await call_gemini_async(prompt, system_instruction)
+        return parse_json_response(response_text)
     except Exception as e:
         logger.warning(f"First attempt to design exam failed: {e}. Retrying with correction prompt...")
         correction_prompt = (
@@ -66,8 +57,8 @@ def generate_exam(topic: str, content: str, num_questions: int = 10) -> dict:
             "Please fix the format error. Return ONLY the valid JSON object conforming exactly to the schema."
         )
         try:
-            response_text = call_gemini(correction_prompt, system_instruction)
-            return json.loads(response_text)
+            response_text = await call_gemini_async(correction_prompt, system_instruction)
+            return parse_json_response(response_text)
         except Exception as retry_e:
             logger.error(f"Retry to design exam failed: {retry_e}")
             raise ValueError(f"Failed to generate valid exam JSON from Gemini: {retry_e}")

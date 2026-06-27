@@ -1,17 +1,9 @@
-import os
 import json
 import logging
 from typing import List, Dict, Any
-from backend.utils.gemini import generate_with_fallback
+from backend.utils.gemini import call_gemini_async, parse_json_response
 
 logger = logging.getLogger(__name__)
-
-def call_gemini(prompt: str, system_instruction: str) -> str:
-    return generate_with_fallback(
-        prompt=prompt,
-        system_instruction=system_instruction,
-        response_mime_type="application/json"
-    )
 
 def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -78,7 +70,7 @@ def build_behavioral_signals(responses: List[Dict[str, Any]], evaluations: List[
         "question_level_signals": question_signals
     }
 
-def analyze_integrity(responses: List[Dict[str, Any]], evaluations: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
+async def analyze_integrity(responses: List[Dict[str, Any]], evaluations: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Agent 4: Integrity Analyzer.
     Analyzes behavioral patterns (timing, confidence vs score, scratchpad utilization, reasoning quality consistency).
@@ -121,8 +113,8 @@ def analyze_integrity(responses: List[Dict[str, Any]], evaluations: List[Dict[st
     )
 
     try:
-        response_text = call_gemini(prompt, system_instruction)
-        return json.loads(response_text)
+        response_text = await call_gemini_async(prompt, system_instruction)
+        return parse_json_response(response_text)
     except Exception as e:
         logger.warning(f"First attempt to analyze integrity failed: {e}. Retrying...")
         correction_prompt = (
@@ -131,8 +123,8 @@ def analyze_integrity(responses: List[Dict[str, Any]], evaluations: List[Dict[st
             "Please return ONLY the valid JSON object for this integrity analysis. Ensure it conforms exactly to the schema."
         )
         try:
-            response_text = call_gemini(correction_prompt, system_instruction)
-            return json.loads(response_text)
+            response_text = await call_gemini_async(correction_prompt, system_instruction)
+            return parse_json_response(response_text)
         except Exception as retry_e:
             logger.error(f"Retry failed to analyze integrity: {retry_e}")
             # Return safe default integrity profile on failure

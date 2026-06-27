@@ -126,7 +126,9 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
     return () => clearInterval(interval);
   }, [loading, submitting, currentIdx, questions]);
 
-  // Telemetry: Detect Tab changes and Window blur
+  // Telemetry: Detect Tab changes via visibilitychange API
+  // Note: window.blur was removed — it caused false positives on address bar clicks,
+  // DevTools opens, taskbar interactions, and OS notifications.
   useEffect(() => {
     if (loading || submitting || !questions.length || currentIdx >= questions.length) return;
 
@@ -156,50 +158,27 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
       }
     };
 
-    const handleWindowBlur = () => {
-      const currentQ = questions[currentIdx];
-      if (lockedQuestions[currentQ.id] || alertActiveRef.current) return;
-
-      alertActiveRef.current = true;
-
-      setAnswers(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
-      setScratchpads(prev => ({ ...prev, [currentQ.id]: "BLOCKED: Tab Switch Detected" }));
-      setLockedQuestions(prev => ({ ...prev, [currentQ.id]: 'tab_switch' }));
-      setTabChangeDetected(prev => ({ ...prev, [currentQ.id]: true }));
-
-      triggerModal(
-        'error',
-        'Cheating Alert: Focus Lost',
-        `You switched focus to another window or application. Question ${currentIdx + 1} has been skipped and locked.`,
-        () => {
-          alertActiveRef.current = false;
-          if (currentIdx < questions.length - 1) {
-            setCurrentIdx(currentIdx + 1);
-          }
-        }
-      );
-    };
-
     document.addEventListener('visibilitychange', handleTabSwitch);
-    window.addEventListener('blur', handleWindowBlur);
 
     return () => {
       document.removeEventListener('visibilitychange', handleTabSwitch);
-      window.removeEventListener('blur', handleWindowBlur);
     };
   }, [loading, submitting, currentIdx, questions, lockedQuestions]);
 
   const handleNext = () => {
     const activeQ = questions[currentIdx];
-    const answer = answers[activeQ.id];
-    const scratchpad = scratchpads[activeQ.id] || '';
-    if (answer && answer.trim() && scratchpad.trim().length < 10) {
-      triggerModal(
-        'warning',
-        'Scratchpad Required',
-        'To proceed, you must explain your step-by-step thinking in the scratchpad (minimum 10 characters).'
-      );
-      return;
+    // Skip scratchpad validation for locked questions (they were blocked by cheating detection)
+    if (!lockedQuestions[activeQ.id]) {
+      const answer = answers[activeQ.id];
+      const scratchpad = scratchpads[activeQ.id] || '';
+      if (answer && answer.trim() && scratchpad.trim().length < 10) {
+        triggerModal(
+          'warning',
+          'Scratchpad Required',
+          'To proceed, you must explain your step-by-step thinking in the scratchpad (minimum 10 characters).'
+        );
+        return;
+      }
     }
 
     if (currentIdx < questions.length - 1) {

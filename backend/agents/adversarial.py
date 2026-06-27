@@ -1,19 +1,11 @@
-import os
 import json
 import logging
 from typing import List, Dict, Any
-from backend.utils.gemini import generate_with_fallback
+from backend.utils.gemini import call_gemini_async, parse_json_response
 
 logger = logging.getLogger(__name__)
 
-def call_gemini(prompt: str, system_instruction: str) -> str:
-    return generate_with_fallback(
-        prompt=prompt,
-        system_instruction=system_instruction,
-        response_mime_type="application/json"
-    )
-
-def generate_probe_questions(blind_spots: List[str], concept_gaps: List[str], original_topic: str) -> dict:
+async def generate_probe_questions(blind_spots: List[str], concept_gaps: List[str], original_topic: str) -> dict:
     """
     Agent 3: Adversarial Probe.
     Generates exactly 3 targeted follow-up questions harder than what the student got wrong.
@@ -51,8 +43,8 @@ def generate_probe_questions(blind_spots: List[str], concept_gaps: List[str], or
     )
 
     try:
-        response_text = call_gemini(prompt, system_instruction)
-        return json.loads(response_text)
+        response_text = await call_gemini_async(prompt, system_instruction)
+        return parse_json_response(response_text)
     except Exception as e:
         logger.warning(f"First attempt to generate probe failed: {e}. Retrying...")
         correction_prompt = (
@@ -61,8 +53,8 @@ def generate_probe_questions(blind_spots: List[str], concept_gaps: List[str], or
             "Please fix the format error. Return ONLY the valid JSON object conforming to the schema."
         )
         try:
-            response_text = call_gemini(correction_prompt, system_instruction)
-            return json.loads(response_text)
+            response_text = await call_gemini_async(correction_prompt, system_instruction)
+            return parse_json_response(response_text)
         except Exception as retry_e:
             logger.error(f"Retry failed to generate probes: {retry_e}")
             # Return empty probe questions on failure so flow continues

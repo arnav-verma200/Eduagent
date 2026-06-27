@@ -1,5 +1,7 @@
 import logging
 import asyncio
+import uuid
+import time
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException
 from typing import Dict, Any, List
 from backend.db.supabase_client import get_supabase
@@ -30,13 +32,13 @@ async def generate_exam_endpoint(
         if not file_bytes:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
         
-        # Parse PDF text
-        parsed_text = parse_pdf_bytes(file_bytes)
+        # Parse PDF text (CPU-bound, run in thread to avoid blocking)
+        parsed_text = await asyncio.to_thread(parse_pdf_bytes, file_bytes)
         if not parsed_text:
             raise HTTPException(status_code=400, detail="No text could be extracted from the PDF.")
             
-        # Run Exam Designer Agent
-        exam_data = generate_exam(topic, parsed_text, num_questions=num_questions)
+        # Run Exam Designer Agent (now async)
+        exam_data = await generate_exam(topic, parsed_text, num_questions=num_questions)
         
         # Save to Supabase
         supabase = get_supabase()
@@ -67,18 +69,32 @@ async def list_exams():
     """
     Lists all exams currently saved in Supabase.
     Useful for populating dashboards.
+    Fixed: Uses a single batch query for results instead of N+1 queries.
     """
     try:
         supabase = get_supabase()
         db_response = supabase.table("exams").select("id, topic, created_by, created_at").order("created_at", desc=True).execute()
         
-        # Also fetch student counts and averages for each exam
         exams_list = db_response.data or []
         
-        # Let's count student attempts for each exam
+        if not exams_list:
+            return exams_list
+        
+        # Batch fetch ALL results in a single query instead of one per exam (N+1 fix)
+        all_results_resp = supabase.table("results").select("exam_id, evaluation").execute()
+        all_results = all_results_resp.data or []
+        
+        # Group results by exam_id
+        results_by_exam: Dict[str, list] = {}
+        for r in all_results:
+            exam_id = r.get("exam_id")
+            if exam_id not in results_by_exam:
+                results_by_exam[exam_id] = []
+            results_by_exam[exam_id].append(r)
+        
+        # Compute counts and averages from the grouped data
         for exam in exams_list:
-            res_response = supabase.table("results").select("evaluation").eq("exam_id", exam["id"]).execute()
-            results = res_response.data or []
+            results = results_by_exam.get(exam["id"], [])
             exam["student_count"] = len(results)
             
             if results:
@@ -123,6 +139,8 @@ async def submit_exam_endpoint(exam_id: str, payload: ExamSubmissionRequest):
     Accepts: {student_id, responses: [{question_id, answer, scratchpad, confidence, time_spent}]}
     Runs Evaluator (Agent 2) -> Integrity (Agent 4) -> Adversarial Probe (Agent 3) in sequence.
     Stores full result in Supabase.
+    Fixed: Deduplicates by deleting previous results for the same student+exam before inserting.
+    Fixed: integrity and adversarial agents are now properly awaited (async).
     """
     try:
         supabase = get_supabase()
@@ -138,25 +156,28 @@ async def submit_exam_endpoint(exam_id: str, payload: ExamSubmissionRequest):
         student_id = payload.student_id
         responses = [r.model_dump() for r in payload.responses]
         
-        # Run Cognitive Evaluator Agent (Agent 2)
+        # Run Cognitive Evaluator Agent (Agent 2) — already async
         evaluation_result = await evaluate_full_exam(questions, responses)
         
-        # Run Integrity Analyzer Agent (Agent 4)
-        integrity_result = analyze_integrity(responses, evaluation_result["evaluations"], questions)
+        # Run Integrity Analyzer Agent (Agent 4) — now async
+        integrity_result = await analyze_integrity(responses, evaluation_result["evaluations"], questions)
         
         # Extract blind spots and concept gaps from cognitive profile
         cog_profile = evaluation_result.get("cognitive_profile", {})
         blind_spots = cog_profile.get("blind_spots", [])
         concept_gaps = cog_profile.get("conceptual_gaps", [])
         
-        # Run Adversarial Probe Agent (Agent 3)
-        probe_result = generate_probe_questions(blind_spots, concept_gaps, topic)
+        # Run Adversarial Probe Agent (Agent 3) — now async
+        probe_result = await generate_probe_questions(blind_spots, concept_gaps, topic)
         probe_questions = probe_result.get("probe_questions", [])
         
-        # Save results to Supabase (upsert or insert)
-        # Check if student already submitted this exam, if so overwrite or create new.
-        # Let's delete previous results for this student on this exam to prevent clutter (or just insert new)
-        # The spec says "Stores full result in Supabase results table". Let's insert.
+        # Deduplicate: Delete previous results for this student on this exam
+        try:
+            supabase.table("results").delete().eq("exam_id", exam_id).eq("student_id", student_id).execute()
+        except Exception as del_err:
+            logger.warning(f"Failed to delete previous results for deduplication: {del_err}")
+        
+        # Save results to Supabase
         db_insert = supabase.table("results").insert({
             "exam_id": exam_id,
             "student_id": student_id,
@@ -270,7 +291,23 @@ async def submit_probe_endpoint(exam_id: str, payload: ProbeSubmissionRequest):
 
 
 # =====================================================================
+# Debate endpoints — with memory leak protection
+# =====================================================================
+
 IN_MEMORY_DEBATES: Dict[str, Dict[str, Any]] = {}
+_MAX_IN_MEMORY_DEBATES = 100  # Cap to prevent unbounded memory growth
+
+def _cleanup_completed_debates():
+    """Remove completed debates from in-memory store to prevent memory leaks."""
+    completed = [did for did, d in IN_MEMORY_DEBATES.items() if d.get("debate_complete")]
+    for did in completed:
+        del IN_MEMORY_DEBATES[did]
+    
+    # If still over limit, remove oldest entries
+    if len(IN_MEMORY_DEBATES) > _MAX_IN_MEMORY_DEBATES:
+        excess = len(IN_MEMORY_DEBATES) - _MAX_IN_MEMORY_DEBATES
+        for did in list(IN_MEMORY_DEBATES.keys())[:excess]:
+            del IN_MEMORY_DEBATES[did]
 
 debate_router = APIRouter(prefix="/api/debate", tags=["debate"])
 
@@ -289,8 +326,8 @@ async def start_debate_endpoint(payload: DebateStartRequest):
         if not question:
             raise HTTPException(status_code=404, detail="Question not found in the exam")
 
-        # Start AI Socratic debate
-        ai_response = start_debate(
+        # Start AI Socratic debate (now async)
+        ai_response = await start_debate(
             question=question,
             student_answer=payload.student_answer,
             original_error_type=payload.original_error_type,
@@ -322,7 +359,9 @@ async def start_debate_endpoint(payload: DebateStartRequest):
             logger.warning(f"Database insert to 'debates' failed: {db_err}. Falling back to in-memory storage.")
             
         if not use_db:
-            import uuid
+            # Cleanup old in-memory debates before adding a new one
+            _cleanup_completed_debates()
+            
             debate_id = str(uuid.uuid4())
             new_debate = {
                 "id": debate_id,
@@ -384,7 +423,7 @@ async def respond_debate_endpoint(debate_id: str, payload: DebateResponseRequest
         history.append({"role": "student", "message": payload.student_message})
         
         # Fetch the question details
-        exam_resp = supabase.table("exams").select("*").eq("id", debate.get("exam_id")).execute()
+        exam_resp = supabase.table("exams").select("questions").eq("id", debate.get("exam_id")).execute()
         if not exam_resp.data:
             raise HTTPException(status_code=404, detail="Original exam not found")
         
@@ -393,8 +432,8 @@ async def respond_debate_endpoint(debate_id: str, payload: DebateResponseRequest
         if not question:
             raise HTTPException(status_code=404, detail="Original question details not found")
         
-        # Continue AI Socratic debate
-        ai_response = continue_debate(
+        # Continue AI Socratic debate (now async)
+        ai_response = await continue_debate(
             question=question,
             student_answer=debate.get("student_answer"),
             original_error_type=debate.get("original_error_type"),
@@ -455,6 +494,10 @@ async def respond_debate_endpoint(debate_id: str, payload: DebateResponseRequest
                     f"Failed to update 'confirmed_diagnosis' on results table: {results_err}. "
                     "Skipping database update for confirmed_diagnosis since the column might be missing."
                 )
+            
+            # Cleanup completed debate from in-memory store
+            if not use_db and debate_id in IN_MEMORY_DEBATES:
+                del IN_MEMORY_DEBATES[debate_id]
                 
         return {
             "message": ai_message,

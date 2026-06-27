@@ -1,22 +1,13 @@
-import os
 import json
 import logging
 import asyncio
 from typing import List, Dict, Any
-from backend.utils.gemini import generate_with_fallback
+from backend.utils.gemini import call_gemini_async, parse_json_response
 
 logger = logging.getLogger(__name__)
 
-def call_gemini(prompt: str, system_instruction: str) -> str:
-    return generate_with_fallback(
-        prompt=prompt,
-        system_instruction=system_instruction,
-        response_mime_type="application/json"
-    )
-
-async def call_gemini_async(prompt: str, system_instruction: str) -> str:
-    """Run the blocking Gemini call in a thread pool to avoid blocking the event loop."""
-    return await asyncio.to_thread(call_gemini, prompt, system_instruction)
+# Limit concurrent Gemini calls to avoid triggering rate limits on free tier
+_GEMINI_SEMAPHORE = asyncio.Semaphore(3)
 
 async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -75,9 +66,11 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
     # Inject question_id in prompt to ensure match
     q_id = question.get("id", "unknown")
     
-    try:
-        response_text = await call_gemini_async(prompt, system_instruction)
-        result = json.loads(response_text)
+    async def _do_evaluate(eval_prompt: str) -> Dict[str, Any]:
+        """Run the Gemini call with semaphore to limit concurrency."""
+        async with _GEMINI_SEMAPHORE:
+            response_text = await call_gemini_async(eval_prompt, system_instruction)
+        result = parse_json_response(response_text)
         result["question_id"] = q_id
         result["answer"] = student_answer
         result["scratchpad"] = scratchpad
@@ -86,6 +79,9 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
         result["options"] = question.get("options", [])
         result["correct_answer"] = question.get("correct_answer")
         return result
+
+    try:
+        return await _do_evaluate(prompt)
     except Exception as e:
         logger.warning(f"First attempt to evaluate question {q_id} failed: {e}. Retrying...")
         correction_prompt = (
@@ -94,16 +90,7 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
             "Please return ONLY the valid JSON object for this evaluation. Ensure it conforms exactly to the schema."
         )
         try:
-            response_text = await call_gemini_async(correction_prompt, system_instruction)
-            result = json.loads(response_text)
-            result["question_id"] = q_id
-            result["answer"] = student_answer
-            result["scratchpad"] = scratchpad
-            result["question_text"] = question.get("text")
-            result["question_type"] = question.get("type")
-            result["options"] = question.get("options", [])
-            result["correct_answer"] = question.get("correct_answer")
-            return result
+            return await _do_evaluate(correction_prompt)
         except Exception as retry_e:
             logger.error(f"Retry failed for question {q_id}: {retry_e}")
             # Return a fallback evaluation structure so the pipeline doesn't break
@@ -127,7 +114,7 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
 
 async def evaluate_full_exam(questions: List[Dict[str, Any]], responses: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Evaluates all questions in parallel, aggregates scores and profiles.
+    Evaluates all questions in parallel (with concurrency limit via semaphore), aggregates scores and profiles.
     """
     # Create lookup map for questions by ID
     q_map = {q["id"]: q for q in questions}

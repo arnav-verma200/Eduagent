@@ -1,5 +1,8 @@
 import os
+import re
+import json
 import time
+import asyncio
 import logging
 from google import genai
 from google.genai import types
@@ -19,10 +22,52 @@ MODELS_CHAIN = [
     "gemini-1.5-pro"
 ]
 
+# --- JSON Cleaning Utilities ---
+
+def clean_json_response(text: str) -> str:
+    """
+    Strips markdown code fences, BOM characters, and whitespace from Gemini responses
+    that are supposed to be raw JSON but often come wrapped in ```json ... ``` blocks.
+    """
+    if not text:
+        return text
+    
+    # Strip BOM characters
+    text = text.strip('\ufeff')
+    
+    # Strip markdown code fences: ```json ... ``` or ``` ... ```
+    # This handles multiline responses wrapped in fences
+    text = re.sub(r'^```(?:json)?\s*\n?', '', text.strip(), flags=re.IGNORECASE)
+    text = re.sub(r'\n?```\s*$', '', text.strip())
+    
+    return text.strip()
+
+
+def parse_json_response(text: str) -> dict:
+    """
+    Cleans a Gemini response string and parses it as JSON.
+    Raises json.JSONDecodeError with a clear message if parsing fails.
+    """
+    cleaned = clean_json_response(text)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        # Log the raw text (truncated) to help debug
+        preview = cleaned[:200] + "..." if len(cleaned) > 200 else cleaned
+        logger.error(f"JSON parse failed. Preview: {preview}")
+        raise json.JSONDecodeError(
+            f"Failed to parse Gemini response as JSON: {e.msg}",
+            e.doc,
+            e.pos
+        )
+
+
+# --- Core Generation Functions ---
+
 def generate_with_fallback(prompt: str, system_instruction: str = None, response_mime_type: str = None) -> str:
     """
     Sends generation request to Gemini models.
-    If a 429 Quota Exhausted error is caught, automatically tries the next model in the fallback chain.
+    If a transient error is caught, automatically tries the next model in the fallback chain.
     """
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
@@ -87,3 +132,37 @@ def generate_with_fallback(prompt: str, system_instruction: str = None, response
     if last_error is not None:
         raise last_error
     raise RuntimeError("All Gemini models in the fallback chain were exhausted or failed without registering an exception.")
+
+
+async def generate_with_fallback_async(prompt: str, system_instruction: str = None, response_mime_type: str = None) -> str:
+    """
+    Async variant of generate_with_fallback that runs the blocking call in a thread pool
+    to avoid blocking the FastAPI event loop.
+    """
+    return await asyncio.to_thread(
+        generate_with_fallback,
+        prompt=prompt,
+        system_instruction=system_instruction,
+        response_mime_type=response_mime_type
+    )
+
+
+# --- Centralized Agent Helpers ---
+# These replace the per-agent call_gemini() wrappers
+
+def call_gemini(prompt: str, system_instruction: str, response_mime_type: str = "application/json") -> str:
+    """Synchronous Gemini call with JSON mime type (used by blocking agent functions)."""
+    return generate_with_fallback(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        response_mime_type=response_mime_type
+    )
+
+
+async def call_gemini_async(prompt: str, system_instruction: str, response_mime_type: str = "application/json") -> str:
+    """Async Gemini call that won't block the event loop."""
+    return await generate_with_fallback_async(
+        prompt=prompt,
+        system_instruction=system_instruction,
+        response_mime_type=response_mime_type
+    )
