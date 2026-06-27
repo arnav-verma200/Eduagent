@@ -89,6 +89,12 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
         response_text = await call_gemini_async(prompt, system_instruction)
         result = json.loads(response_text)
         result["question_id"] = q_id
+        result["answer"] = student_answer
+        result["scratchpad"] = scratchpad
+        result["question_text"] = question.get("text")
+        result["question_type"] = question.get("type")
+        result["options"] = question.get("options", [])
+        result["correct_answer"] = question.get("correct_answer")
         return result
     except Exception as e:
         logger.warning(f"First attempt to evaluate question {q_id} failed: {e}. Retrying...")
@@ -101,6 +107,12 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
             response_text = await call_gemini_async(correction_prompt, system_instruction)
             result = json.loads(response_text)
             result["question_id"] = q_id
+            result["answer"] = student_answer
+            result["scratchpad"] = scratchpad
+            result["question_text"] = question.get("text")
+            result["question_type"] = question.get("type")
+            result["options"] = question.get("options", [])
+            result["correct_answer"] = question.get("correct_answer")
             return result
         except Exception as retry_e:
             logger.error(f"Retry failed for question {q_id}: {retry_e}")
@@ -114,7 +126,13 @@ async def evaluate_response(question: Dict[str, Any], response_dict: Dict[str, A
                 "concept_gap": None if is_correct else question.get("concept_tag"),
                 "reasoning_quality": "weak" if scratchpad and scratchpad != "No scratchpad provided" else "absent",
                 "feedback": "Evaluation fell back due to API error." if not is_correct else "Correct answer.",
-                "confidence_accuracy": "calibrated"
+                "confidence_accuracy": "calibrated",
+                "answer": student_answer,
+                "scratchpad": scratchpad,
+                "question_text": question.get("text"),
+                "question_type": question.get("type"),
+                "options": question.get("options", []),
+                "correct_answer": question.get("correct_answer")
             }
 
 async def evaluate_full_exam(questions: List[Dict[str, Any]], responses: List[Dict[str, Any]]) -> Dict[str, Any]:

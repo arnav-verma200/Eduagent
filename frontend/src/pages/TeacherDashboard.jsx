@@ -3,6 +3,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, 
   BarChart, Bar, XAxis, YAxis, CartesianGrid 
 } from 'recharts';
+import Modal from '../components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
@@ -16,6 +17,27 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
   const [report, setReport] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('overview'); // overview, gaps, integrity, students
+
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'info',
+    title: '',
+    message: ''
+  });
+
+  const triggerModal = (type, title, message) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Fetch all exams on load
   const fetchExams = async () => {
@@ -81,11 +103,19 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
         fetchReport(data.exam_id);
       } else {
         const errText = await res.text();
-        alert(`Failed to generate exam: ${errText}`);
+        triggerModal(
+          'error',
+          'Exam Generation Failed',
+          `Failed to generate exam: ${errText}`
+        );
       }
     } catch (err) {
       console.error("Error generating exam:", err);
-      alert("Error contacting the backend. Make sure your FastAPI server is running.");
+      triggerModal(
+        'error',
+        'Connection Error',
+        'Error contacting the backend. Make sure your FastAPI server is running.'
+      );
     } finally {
       setLoading(false);
     }
@@ -564,6 +594,14 @@ const TeacherDashboard = ({ onViewStudentReport }) => {
         </div>
 
       </div>
+      {/* Custom Modal Popup */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        message={modalConfig.message}
+      />
     </div>
   );
 };

@@ -1,14 +1,43 @@
 import React, { useState, useEffect } from 'react';
+import Modal from '../components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
 const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null); // null | 'not_found' | 'failed'
   
   // Probe answers submission state
   const [probeAnswers, setProbeAnswers] = useState({}); // { p1: answer }
   const [submittingProbe, setSubmittingProbe] = useState(false);
+
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'info',
+    title: '',
+    message: '',
+    confirmText: 'OK',
+    cancelText: 'Cancel',
+    onConfirm: null
+  });
+
+  const triggerModal = (type, title, message, onConfirm = null, confirmText = 'OK', cancelText = 'Cancel') => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Fetch report data if not passed from submit
   const fetchReport = async () => {
@@ -25,11 +54,14 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
           initialAnswers[pq.id] = '';
         });
         setProbeAnswers(initialAnswers);
+      } else if (res.status === 404) {
+        setError('not_found');
       } else {
-        alert("Failed to load your cognitive report card.");
+        setError('failed');
       }
     } catch (err) {
       console.error("Error fetching report:", err);
+      setError('failed');
     } finally {
       setLoading(false);
     }
@@ -76,7 +108,11 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
       pq => !probeAnswers[pq.id] || !probeAnswers[pq.id].trim()
     );
     if (unanswered.length > 0) {
-      alert("Please answer all diagnostic probe questions before submitting.");
+      triggerModal(
+        'warning',
+        'Unanswered Probes',
+        'Please answer all diagnostic probe questions before submitting.'
+      );
       return;
     }
 
@@ -106,11 +142,19 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
           gap_depth: data.gap_depth
         }));
       } else {
-        alert("Failed to submit diagnostic probes.");
+        triggerModal(
+          'error',
+          'Failed to Submit Probes',
+          'Failed to submit diagnostic probes. Please try again later.'
+        );
       }
     } catch (err) {
       console.error("Error submitting probes:", err);
-      alert("Error contacting the backend.");
+      triggerModal(
+        'error',
+        'Connection Error',
+        'Error contacting the backend. Make sure your server is running.'
+      );
     } finally {
       setSubmittingProbe(false);
     }
@@ -154,6 +198,54 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
         </svg>
         <p className="text-gray-400">Compiling cognitive fingerprint report...</p>
+      </div>
+    );
+  }
+
+  if (error === 'not_found') {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="glass-panel rounded-3xl p-8 border border-white/5 space-y-6">
+          <div className="h-16 w-16 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full flex items-center justify-center mx-auto text-2xl font-black">
+            !
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-white">No Report Found</h3>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              No exam submission was found for Student ID <span className="font-mono text-blue-400">{studentId}</span> on this exam. Please take the exam first!
+            </p>
+          </div>
+          <button 
+            onClick={onBack}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold transition"
+          >
+            Go to Student Desk
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !report) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-16 text-center">
+        <div className="glass-panel rounded-3xl p-8 border border-white/5 space-y-6">
+          <div className="h-16 w-16 bg-red-500/10 text-red-400 border border-red-500/20 rounded-full flex items-center justify-center mx-auto text-2xl font-black">
+            ×
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-bold text-white">Failed to Load Report</h3>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              We encountered an issue loading your report card. Please check your network and try again.
+            </p>
+          </div>
+          <button 
+            onClick={onBack}
+            className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white border border-white/5 rounded-xl text-xs font-semibold transition"
+          >
+            Back
+          </button>
+        </div>
       </div>
     );
   }
@@ -424,6 +516,18 @@ const ReportCard = ({ examId, studentId, initialReportData, onBack }) => {
           </div>
         ))}
       </div>
+
+      {/* Custom Modal Popup */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmText={modalConfig.confirmText}
+        cancelText={modalConfig.cancelText}
+        onConfirm={modalConfig.onConfirm}
+      />
     </div>
   );
 };

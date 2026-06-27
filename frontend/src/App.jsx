@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import TeacherDashboard from './pages/TeacherDashboard';
 import ExamInterface from './pages/ExamInterface';
 import ReportCard from './pages/ReportCard';
+import Modal from './components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
@@ -13,6 +14,27 @@ function App() {
   const [activeExams, setActiveExams] = useState([]);
   const [examsLoading, setExamsLoading] = useState(false);
   const [submittedReportData, setSubmittedReportData] = useState(null);
+
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'info',
+    title: '',
+    message: ''
+  });
+
+  const triggerModal = (type, title, message) => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Fetch exams for student list
   const fetchStudentExams = async () => {
@@ -38,7 +60,11 @@ function App() {
 
   const handleStartExam = (examId) => {
     if (!studentId.trim()) {
-      alert("Please enter a Student ID to begin the exam.");
+      triggerModal(
+        'warning',
+        'Student ID Required',
+        'Please enter a Student ID to begin the exam.'
+      );
       return;
     }
     setSelectedExamId(examId);
@@ -221,6 +247,14 @@ function App() {
       <footer className="py-6 text-center text-xs text-gray-600 border-t border-white/5 mt-12 bg-black/40">
         EduAgent Exam Engine &copy; 2026. Made with Google Gemini AI.
       </footer>
+      {/* Custom Modal Popup */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        message={modalConfig.message}
+      />
     </div>
   );
 }

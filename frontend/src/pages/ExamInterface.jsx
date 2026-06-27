@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Scratchpad from '../components/Scratchpad';
 import ConfidenceSlider from '../components/ConfidenceSlider';
+import Modal from '../components/Modal';
 
 const API_BASE = "http://localhost:8000";
 
@@ -19,6 +20,33 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
   
   // Total timer
   const [totalSeconds, setTotalSeconds] = useState(0);
+
+  // Custom Modal configuration
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'info',
+    title: '',
+    message: '',
+    confirmText: 'OK',
+    cancelText: 'Cancel',
+    onConfirm: null
+  });
+
+  const triggerModal = (type, title, message, onConfirm = null, confirmText = 'OK', cancelText = 'Cancel') => {
+    setModalConfig({
+      isOpen: true,
+      type,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      onConfirm
+    });
+  };
+
+  const closeModal = () => {
+    setModalConfig(prev => ({ ...prev, isOpen: false }));
+  };
 
   // Fetch exam questions
   useEffect(() => {
@@ -48,10 +76,23 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
           setConfidences(initialConfidences);
           setTimeSpent(initialTimes);
         } else {
-          alert("Failed to load the exam questions.");
+          triggerModal(
+            'error',
+            'Failed to Load Exam',
+            'Failed to load the exam questions. Please try again later.',
+            onCancel,
+            'Back to Desk'
+          );
         }
       } catch (err) {
         console.error("Error fetching exam:", err);
+        triggerModal(
+          'error',
+          'Failed to Load Exam',
+          'Failed to load the exam questions. Please check your connection and try again.',
+          onCancel,
+          'Back to Desk'
+        );
       } finally {
         setLoading(false);
       }
@@ -78,6 +119,18 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
   }, [loading, submitting, currentIdx, questions]);
 
   const handleNext = () => {
+    const activeQ = questions[currentIdx];
+    const answer = answers[activeQ.id];
+    const scratchpad = scratchpads[activeQ.id] || '';
+    if (answer && answer.trim() && scratchpad.trim().length < 10) {
+      triggerModal(
+        'warning',
+        'Scratchpad Required',
+        'To proceed, you must explain your step-by-step thinking in the scratchpad (minimum 10 characters).'
+      );
+      return;
+    }
+
     if (currentIdx < questions.length - 1) {
       setCurrentIdx(currentIdx + 1);
     }
@@ -117,16 +170,7 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
     }));
   };
 
-  const handleSubmitExam = async () => {
-    // Basic verification: check if they answered all questions
-    const unanswered = questions.filter(q => !answers[q.id] || !answers[q.id].trim());
-    if (unanswered.length > 0) {
-      const confirmSubmit = window.confirm(
-        `You have ${unanswered.length} unanswered questions. Are you sure you want to submit?`
-      );
-      if (!confirmSubmit) return;
-    }
-
+  const executeSubmission = async () => {
     setSubmitting(true);
     
     // Map responses into the payload structure
@@ -156,13 +200,74 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
         onSubmitSuccess(data);
       } else {
         const errText = await res.text();
-        alert(`Submission failed: ${errText}`);
+        triggerModal(
+          'error',
+          'Submission Failed',
+          `Submission failed: ${errText}`
+        );
       }
     } catch (err) {
       console.error("Error submitting exam:", err);
-      alert("Error contacting the backend to submit. Make sure your server is running.");
+      triggerModal(
+        'error',
+        'Connection Error',
+        'Error contacting the backend to submit. Make sure your server is running.'
+      );
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleSubmitExam = () => {
+    // Check current question scratchpad
+    const activeQ = questions[currentIdx];
+    const answer = answers[activeQ.id];
+    const scratchpad = scratchpads[activeQ.id] || '';
+    if (answer && answer.trim() && scratchpad.trim().length < 10) {
+      triggerModal(
+        'warning',
+        'Scratchpad Required',
+        'To proceed, you must explain your step-by-step thinking in the scratchpad (minimum 10 characters).'
+      );
+      return;
+    }
+
+    // Check all questions scratchpad
+    const missingScratchpads = questions.filter(q => {
+      const ans = answers[q.id];
+      const scratch = scratchpads[q.id] || '';
+      return ans && ans.trim() && scratch.trim().length < 10;
+    });
+
+    if (missingScratchpads.length > 0) {
+      triggerModal(
+        'warning',
+        'Reasoning Required',
+        `You provided answers for some questions but did not write reasoning in the scratchpad (minimum 10 characters). Please complete them first.`
+      );
+      return;
+    }
+
+    // Basic verification: check if they answered all questions
+    const unanswered = questions.filter(q => !answers[q.id] || !answers[q.id].trim());
+    if (unanswered.length > 0) {
+      triggerModal(
+        'confirm',
+        'Unanswered Questions',
+        `You have ${unanswered.length} unanswered questions. Are you sure you want to submit?`,
+        executeSubmission,
+        'Submit Anyway',
+        'Go Back'
+      );
+    } else {
+      triggerModal(
+        'confirm',
+        'Submit Exam',
+        'Are you sure you want to submit your exam for evaluation?',
+        executeSubmission,
+        'Submit',
+        'Cancel'
+      );
     }
   };
 
@@ -217,13 +322,24 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
   const qConfidence = confidences[currentQ.id] || 3;
   const qTime = timeSpent[currentQ.id] || 0;
 
+  const handleExitClick = () => {
+    triggerModal(
+      'confirm',
+      'Exit Exam',
+      'Are you sure you want to exit? Your progress on this exam will be lost.',
+      onCancel,
+      'Exit',
+      'Stay'
+    );
+  };
+
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
       {/* Top Banner: Navigation / Title & Timers */}
       <div className="glass-panel rounded-2xl p-4 mb-6 flex justify-between items-center">
         <div>
           <button 
-            onClick={onCancel}
+            onClick={handleExitClick}
             className="text-xs text-gray-400 hover:text-white flex items-center gap-1 font-semibold"
           >
             &larr; Exit Exam
@@ -355,6 +471,18 @@ const ExamInterface = ({ examId, studentId, onSubmitSuccess, onCancel }) => {
           </button>
         )}
       </div>
+      
+      {/* Custom Modal Popup */}
+      <Modal
+        isOpen={modalConfig.isOpen}
+        onClose={closeModal}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        confirmText={modalConfig.confirmText}
+        cancelText={modalConfig.cancelText}
+        onConfirm={modalConfig.onConfirm}
+      />
     </div>
   );
 };
