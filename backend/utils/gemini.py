@@ -12,7 +12,9 @@ logger = logging.getLogger(__name__)
 
 MODELS_CHAIN = [
     "gemma-4-26b",
-    "gemma-4-31b"
+    "gemma-4-31b",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro"
 ]
 
 # --- Singleton Client (PERF-2 fix) ---
